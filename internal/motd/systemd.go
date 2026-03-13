@@ -124,6 +124,27 @@ func formatServiceLine(svc systemd.ServiceInfo, displayName string, maxNameLen i
 	case "failed":
 		statusStr = ErrorStyle.Render("failed")
 	case "inactive":
+		if svc.TimerActive != "" {
+			timerState := svc.TimerActive
+			if svc.TimerSub != "" && svc.TimerSub != svc.TimerActive {
+				timerState = fmt.Sprintf("%s/%s", svc.TimerActive, svc.TimerSub)
+			}
+
+			status := fmt.Sprintf("scheduled • timer %s", timerState)
+			if svc.TimerActive != "active" {
+				status = fmt.Sprintf("inactive • timer %s", timerState)
+			}
+			if svc.TimerNextIn != "" {
+				status = fmt.Sprintf("%s • next in %s", status, svc.TimerNextIn)
+			}
+			if svc.TimerActive == "active" {
+				statusStr = SuccessStyle.Render(status)
+			} else {
+				statusStr = WarningStyle.Render(status)
+			}
+			break
+		}
+
 		statusStr = WarningStyle.Render("inactive")
 	default:
 		statusStr = WarningStyle.Render(svc.Active)

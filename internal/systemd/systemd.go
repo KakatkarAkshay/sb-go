@@ -3,6 +3,7 @@ package systemd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -22,10 +23,13 @@ type ServiceFilter struct {
 
 // ServiceInfo holds information about a systemd service.
 type ServiceInfo struct {
-	Name    string // Service name without .service suffix
-	Active  string // active, inactive, failed
-	Sub     string // running, dead, failed, exited, etc.
-	Runtime string // e.g., "3d 2h" (only for active services)
+	Name        string // Service name without .service suffix
+	Active      string // active, inactive, failed
+	Sub         string // running, dead, failed, exited, etc.
+	Runtime     string // e.g., "3d 2h" (only for active services)
+	TimerActive string // associated timer active state (if <service>.timer exists)
+	TimerSub    string // associated timer sub state (e.g., waiting)
+	TimerNextIn string // remaining time until next trigger (best effort)
 }
 
 // DefaultFilters are the default service filters used by MOTD and logs commands.
@@ -71,12 +75,26 @@ func GetFilteredServices(ctx context.Context, filters []ServiceFilter) ([]Servic
 	})
 
 	// Fetch runtime for active services
+	timerNextByService, _ := getTimerNextByService(ctx)
+
 	for i := range services {
 		if services[i].Active == "active" {
 			runtime, err := GetServiceRuntime(ctx, services[i].Name)
 			if err == nil {
 				services[i].Runtime = runtime
 			}
+			continue
+		}
+
+		timerInfo, err := getAssociatedTimerInfo(ctx, services[i].Name)
+		if err == nil {
+			services[i].TimerActive = timerInfo.Active
+			services[i].TimerSub = timerInfo.Sub
+			services[i].TimerNextIn = timerInfo.NextIn
+		}
+
+		if nextIn, ok := timerNextByService[services[i].Name]; ok {
+			services[i].TimerNextIn = nextIn
 		}
 	}
 
@@ -98,7 +116,7 @@ func parseSystemctlOutput(output string, filter ServiceFilter, serviceMap map[st
 			continue
 		}
 
-		// Extract service name and status (columns: UNIT LOAD ACTIVE SUB DESCRIPTION)
+		// Extract service fields (columns: UNIT LOAD ACTIVE SUB DESCRIPTION)
 		// Lines may start with ● for failed services
 		fields := strings.Fields(line)
 		if len(fields) >= 4 {
@@ -111,12 +129,18 @@ func parseSystemctlOutput(output string, filter ServiceFilter, serviceMap map[st
 			}
 			serviceName := strings.TrimPrefix(fields[fieldOffset], "●")
 			serviceName = strings.TrimSpace(serviceName)
+			load := fields[fieldOffset+1]
 
 			if !strings.HasSuffix(serviceName, ".service") {
 				continue
 			}
 
 			serviceName = strings.TrimSuffix(serviceName, ".service")
+
+			// Ignore stale units where the unit file no longer exists.
+			if load == "not-found" {
+				continue
+			}
 
 			// Verify the service matches our filter criteria
 			if !matchesFilter(serviceName, filter) {
@@ -223,6 +247,153 @@ func readUptimeSeconds() (float64, error) {
 		return 0, fmt.Errorf("empty uptime data")
 	}
 	return strconv.ParseFloat(fields[0], 64)
+}
+
+type timerInfo struct {
+	Active string
+	Sub    string
+	NextIn string
+}
+
+func getAssociatedTimerInfo(ctx context.Context, serviceName string) (timerInfo, error) {
+	timerUnit := serviceName
+	if !strings.HasSuffix(timerUnit, ".timer") {
+		timerUnit += ".timer"
+	}
+
+	result, err := executor.Run(ctx, "systemctl",
+		executor.WithArgs(
+			"show",
+			timerUnit,
+			"--property=LoadState",
+			"--property=ActiveState",
+			"--property=SubState",
+			"--property=NextElapseUSecRealtime",
+			"--no-pager",
+		),
+		executor.WithOutputMode(executor.OutputModeCombined),
+	)
+	if err != nil {
+		// Most commonly the timer unit simply does not exist for this service.
+		return timerInfo{}, nil
+	}
+
+	props := parseSystemctlShowProperties(string(result.Combined))
+	if props["LoadState"] == "" || props["LoadState"] == "not-found" {
+		return timerInfo{}, nil
+	}
+
+	info := timerInfo{
+		Active: props["ActiveState"],
+		Sub:    props["SubState"],
+	}
+
+	nextIn := formatNextIn(props["NextElapseUSecRealtime"], time.Now())
+	if nextIn != "" {
+		info.NextIn = nextIn
+	}
+
+	return info, nil
+}
+
+func parseSystemctlShowProperties(output string) map[string]string {
+	props := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		props[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return props
+}
+
+func formatNextIn(next string, now time.Time) string {
+	next = strings.TrimSpace(next)
+	if next == "" || next == "n/a" {
+		return ""
+	}
+
+	nextTime, err := parseSystemdTimestamp(next)
+	if err != nil || nextTime.IsZero() {
+		return ""
+	}
+
+	d := nextTime.Sub(now)
+	if d <= 0 {
+		return "soon"
+	}
+	return FormatDuration(d)
+}
+
+func parseSystemdTimestamp(timestamp string) (time.Time, error) {
+	formats := []string{
+		"Mon 2006-01-02 15:04:05 MST",
+		time.RFC1123,
+		time.RFC1123Z,
+		time.RFC3339,
+	}
+
+	for _, format := range formats {
+		t, err := time.Parse(format, timestamp)
+		if err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("failed to parse timestamp: %s", timestamp)
+}
+
+type listTimersEntry struct {
+	Next      *int64  `json:"next"`
+	Unit      string  `json:"unit"`
+	Activates *string `json:"activates"`
+}
+
+func getTimerNextByService(ctx context.Context) (map[string]string, error) {
+	result, err := executor.Run(ctx, "systemctl",
+		executor.WithArgs("list-timers", "--all", "--no-pager", "--output=json"),
+		executor.WithOutputMode(executor.OutputModeCombined),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListTimersJSON(string(result.Combined), time.Now())
+}
+
+func parseListTimersJSON(output string, now time.Time) (map[string]string, error) {
+	var entries []listTimersEntry
+	if err := json.Unmarshal([]byte(output), &entries); err != nil {
+		return nil, err
+	}
+
+	nextByService := make(map[string]string)
+	for _, entry := range entries {
+		if entry.Next == nil || entry.Activates == nil || *entry.Activates == "" {
+			continue
+		}
+
+		serviceName := strings.TrimSuffix(*entry.Activates, ".service")
+		if serviceName == "" {
+			continue
+		}
+
+		next := time.UnixMicro(*entry.Next)
+		d := next.Sub(now)
+		if d <= 0 {
+			nextByService[serviceName] = "soon"
+			continue
+		}
+		nextByService[serviceName] = FormatDuration(d)
+	}
+
+	return nextByService, nil
 }
 
 // FormatDuration formats a duration into a human-readable string.
