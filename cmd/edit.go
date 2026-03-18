@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/saltyorg/sb-go/internal/constants"
-	"github.com/saltyorg/sb-go/internal/executor"
 	"github.com/saltyorg/sb-go/internal/signals"
 
 	"charm.land/bubbles/v2/list"
@@ -46,6 +44,9 @@ func (m ConfigSelectorModel) Init() tea.Cmd {
 	return nil
 }
 
+// editorFinishedMsg is sent when the editor process exits.
+type editorFinishedMsg struct{ err error }
+
 func (m ConfigSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -60,12 +61,21 @@ func (m ConfigSelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "enter" {
 			selectedItem, ok := m.list.SelectedItem().(ConfigItem)
 			if ok {
-				if err := openEditor(selectedItem.path); err != nil {
+				c, err := editorCommand(selectedItem.path)
+				if err != nil {
 					fmt.Printf("Error: %v\n", err)
+					return m, tea.Quit
 				}
-				return m, tea.Quit
+				return m, tea.ExecProcess(c, func(err error) tea.Msg {
+					return editorFinishedMsg{err}
+				})
 			}
 		}
+	case editorFinishedMsg:
+		if msg.err != nil {
+			fmt.Printf("Error: %v\n", msg.err)
+		}
+		return m, tea.Quit
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
 		m.list.SetSize(msg.Width-h, msg.Height-v)
@@ -82,10 +92,11 @@ func (m ConfigSelectorModel) View() tea.View {
 	return v
 }
 
-func openEditor(path string) error {
+// editorCommand builds an *exec.Cmd for the user's preferred editor.
+func editorCommand(path string) (*exec.Cmd, error) {
 	// Check if file exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return fmt.Errorf("configuration file does not yet exist: %s", path)
+		return nil, fmt.Errorf("configuration file does not yet exist: %s", path)
 	}
 
 	editor := os.Getenv("EDITOR")
@@ -94,39 +105,41 @@ func openEditor(path string) error {
 	}
 
 	// Validate and sanitize editor command
-	// Split on whitespace to get the base command
 	editorParts := strings.Fields(editor)
 	if len(editorParts) == 0 {
-		return fmt.Errorf("invalid EDITOR environment variable")
+		return nil, fmt.Errorf("invalid EDITOR environment variable")
 	}
 
 	// Get the absolute path of the editor executable
 	editorPath, err := exec.LookPath(editorParts[0])
 	if err != nil {
-		// If not in PATH, check if it's an absolute path
 		if filepath.IsAbs(editorParts[0]) {
 			editorPath = editorParts[0]
 		} else {
-			return fmt.Errorf("editor '%s' not found in PATH", editorParts[0])
+			return nil, fmt.Errorf("editor '%s' not found in PATH", editorParts[0])
 		}
 	}
 
 	// Construct command with validated editor and additional args if any
 	var args []string
 	if len(editorParts) > 1 {
-		// Include any additional arguments from EDITOR variable
 		args = append(editorParts[1:], path)
 	} else {
 		args = []string{path}
 	}
 
-	// Run editor using unified executor in interactive mode
-	_, err = executor.Run(context.Background(), editorPath,
-		executor.WithArgs(args...),
-		executor.WithOutputMode(executor.OutputModeInteractive),
-		executor.WithInheritEnv(),
-	)
+	return exec.Command(editorPath, args...), nil
+}
+
+func openEditor(path string) error {
+	c, err := editorCommand(path)
 	if err != nil {
+		return err
+	}
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
 		return fmt.Errorf("error opening editor: %w", err)
 	}
 	return nil
