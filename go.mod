@@ -3,7 +3,7 @@ module github.com/saltyorg/sb-go
 go 1.26.1
 
 require (
-	charm.land/bubbles/v2 v2.0.0
+	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.2
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/Masterminds/semver/v3 v3.4.0
@@ -16,7 +16,7 @@ require (
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260311145557-c83711a11ffa
 	github.com/cloudflare/cloudflare-go/v6 v6.8.0
 	github.com/creativeprojects/go-selfupdate v1.5.2
-	github.com/go-playground/validator/v10 v10.30.1
+	github.com/go-playground/validator/v10 v10.30.2
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mattn/go-runewidth v0.0.21
 	github.com/moby/moby/api v1.54.0
