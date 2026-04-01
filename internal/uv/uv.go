@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/saltyorg/sb-go/internal/constants"
@@ -34,12 +35,20 @@ func DownloadAndInstallUV(ctx context.Context, verbose bool) error {
 		return nil
 	}
 
+	uvTarget := "x86_64-unknown-linux-gnu"
+	switch strings.TrimSpace(runtime.GOARCH) {
+	case "arm64":
+		uvTarget = "aarch64-unknown-linux-gnu"
+	case "amd64":
+		uvTarget = "x86_64-unknown-linux-gnu"
+	}
+
 	// Get the latest release URL
 	var downloadURL string
 	if UVVersion == "latest" {
-		downloadURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz", UVGitHubRepo)
+		downloadURL = fmt.Sprintf("https://github.com/%s/releases/latest/download/uv-%s.tar.gz", UVGitHubRepo, uvTarget)
 	} else {
-		downloadURL = fmt.Sprintf("https://github.com/%s/releases/download/%s/uv-x86_64-unknown-linux-gnu.tar.gz", UVGitHubRepo, UVVersion)
+		downloadURL = fmt.Sprintf("https://github.com/%s/releases/download/%s/uv-%s.tar.gz", UVGitHubRepo, UVVersion, uvTarget)
 	}
 
 	if verbose {
@@ -119,7 +128,7 @@ func extractUVBinary(tarballPath, destPath string, verbose bool) error {
 			return fmt.Errorf("error reading tar: %w", err)
 		}
 
-		// Look for the uv binary (it should be in a path like uv-x86_64-unknown-linux-gnu/uv)
+		// Look for the uv binary (it should be in a path like uv-<target>/uv)
 		if strings.HasSuffix(header.Name, "/uv") || header.Name == "uv" {
 			if verbose {
 				fmt.Printf("Extracting %s to %s\n", header.Name, destPath)

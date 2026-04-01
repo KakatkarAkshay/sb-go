@@ -44,7 +44,7 @@ func retryWithBackoff(operation func() error, maxRetries int, baseDelay time.Dur
 	return fmt.Errorf("operation failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
-// validateBinary performs validation checks on the downloaded Ubuntu x86_64 binary
+// validateBinary performs validation checks on the downloaded Linux binary
 func validateBinary(filePath string, expectedSize int64, verbose bool) error {
 	if verbose {
 		fmt.Printf("Validating downloaded binary: %s\n", filePath)
@@ -65,7 +65,7 @@ func validateBinary(filePath string, expectedSize int64, verbose bool) error {
 		return fmt.Errorf("file size mismatch: expected %d bytes, got %d bytes", expectedSize, actualSize)
 	}
 
-	// Read first 4 bytes to check for ELF header (Ubuntu x86_64 binary)
+	// Read first 4 bytes to check for an ELF header.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("cannot open file for validation: %w", err)
@@ -86,7 +86,7 @@ func validateBinary(filePath string, expectedSize int64, verbose bool) error {
 		if verbose {
 			fmt.Println("- Invalid ELF header")
 		}
-		return fmt.Errorf("file is not a valid ELF binary (expected for Ubuntu x86_64)")
+		return fmt.Errorf("file is not a valid ELF binary")
 	}
 
 	if verbose {

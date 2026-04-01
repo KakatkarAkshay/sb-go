@@ -12,12 +12,16 @@ permissions:
 
 env:
   APP_NAME: 'sb'
-  GITHUB_REPO: 'github.com/saltyorg/sb-go'
+  MODULE_REPO: 'github.com/saltyorg/sb-go'
 
 jobs:
-  build_and_release:
-    name: Build and Release
+  build:
+    name: Build (${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
     outputs:
       version: ${{ steps.determine_version.outputs.version }}
       git_commit: ${{ steps.get_git_commit.outputs.short_sha }}
@@ -51,58 +55,73 @@ jobs:
           VERSION: ${{ steps.determine_version.outputs.version }}
           GIT_COMMIT: ${{ steps.get_git_commit.outputs.short_sha }}
           GOOS: linux
-          GOARCH: amd64
+          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          ldflags="-w -s -X '${GITHUB_REPO}/internal/runtime.Version=${VERSION}' -X '${GITHUB_REPO}/internal/runtime.GitCommit=${GIT_COMMIT}' -X 'github.com/saltyorg/sb-go/internal/runtime.DisableSelfUpdate=false'"
+          ldflags="-w -s -X '${MODULE_REPO}/internal/runtime.Version=${VERSION}' -X '${MODULE_REPO}/internal/runtime.GitCommit=${GIT_COMMIT}' -X '${MODULE_REPO}/internal/runtime.DisableSelfUpdate=false'"
           
           # For GitHub releases, use the selfupdate naming convention
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             OUTPUT_NAME="${APP_NAME}_${GOOS}_${GOARCH}"
           else
-            OUTPUT_NAME="${APP_NAME}"
+            OUTPUT_NAME="${APP_NAME}-${GOARCH}"
           fi
           
-          go build -trimpath -ldflags="${ldflags}" -o ${OUTPUT_NAME} .
+          go build -trimpath -ldflags="${ldflags}" -o "${OUTPUT_NAME}" .
+          echo "output_name=${OUTPUT_NAME}" >> "$GITHUB_OUTPUT"
+        id: build_binary
 
       - name: Upload Artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.APP_NAME }}
-          path: ${{ env.APP_NAME }}
+          name: ${{ env.APP_NAME }}-linux-${{ matrix.goarch }}
+          path: ${{ steps.build_binary.outputs.output_name }}
+
+  release:
+    name: Release
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: ${{ env.APP_NAME }}-linux-*
+          merge-multiple: true
+          path: dist
+
+      - name: Determine Version
+        id: determine_version
+        run: echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate Release Notes
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         id: release_notes
         run: |
-          # Get the previous tag
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
-          # Create release notes
           echo "## What's Changed" > release_notes.md
           echo "" >> release_notes.md
 
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "### Commits since $PREVIOUS_TAG:" >> release_notes.md
             echo "" >> release_notes.md
-
-            # Get commits between previous tag and current commit
             git log --pretty=format:"- %s (%h)" "$PREVIOUS_TAG"..HEAD >> release_notes.md
           else
             echo "### Commits in this release:" >> release_notes.md
             echo "" >> release_notes.md
-
-            # Get all commits if this is the first tag
             git log --pretty=format:"- %s (%h)" >> release_notes.md
           fi
 
           echo "" >> release_notes.md
           echo "" >> release_notes.md
-          echo "**Full Changelog**: https://github.com/saltyorg/sb-go/compare/$PREVIOUS_TAG...${{ steps.determine_version.outputs.version }}" >> release_notes.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ steps.determine_version.outputs.version }}" >> release_notes.md
 
       - name: Create GitHub Release
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -112,10 +131,11 @@ jobs:
           draft: false
           body_path: release_notes.md
           prerelease: false
-          files: ${{ env.APP_NAME }}_linux_amd64
+          files: |
+            dist/${{ env.APP_NAME }}_linux_amd64
+            dist/${{ env.APP_NAME }}_linux_arm64
 
       - name: Notify Discord
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
@@ -138,21 +158,21 @@ jobs:
                 "title": "🚀 New Release: ${{ steps.determine_version.outputs.version }}",
                 "description": "$(echo "$RELEASE_NOTES" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')",
                 "color": 5814783,
-                "url": "https://github.com/saltyorg/sb-go/releases/tag/${{ steps.determine_version.outputs.version }}",
+                "url": "https://github.com/${{ github.repository }}/releases/tag/${{ steps.determine_version.outputs.version }}",
                 "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
                 "footer": {
                   "text": "sb-go",
-                  "icon_url": "https://github.com/saltyorg.png"
+                  "icon_url": "https://github.com/${{ github.repository_owner }}.png"
                 },
                 "fields": [
                   {
                     "name": "📥 Download",
-                    "value": "[sb_linux_amd64](https://github.com/saltyorg/sb-go/releases/download/${{ steps.determine_version.outputs.version }}/sb_linux_amd64)",
+                    "value": "[amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.determine_version.outputs.version }}/sb_linux_amd64) | [arm64](https://github.com/${{ github.repository }}/releases/download/${{ steps.determine_version.outputs.version }}/sb_linux_arm64)",
                     "inline": true
                   },
                   {
                     "name": "📝 Full Changelog",
-                    "value": "[View Changes](https://github.com/saltyorg/sb-go/releases/tag/${{ steps.determine_version.outputs.version }})",
+                    "value": "[View Changes](https://github.com/${{ github.repository }}/releases/tag/${{ steps.determine_version.outputs.version }})",
                     "inline": true
                   }
                 ]

@@ -123,7 +123,7 @@ func TestCheckArchitecture(t *testing.T) {
 	t.Run("check architecture execution", func(t *testing.T) {
 		err := CheckArchitecture(ctx)
 		// The result depends on the actual system architecture
-		// On x86_64 systems, this should pass
+		// On amd64/arm64 systems, this should pass
 		// On other architectures, it should fail
 		_ = err // We just verify the function executes
 	})
@@ -491,7 +491,12 @@ func TestGetArchitectureOutput(t *testing.T) {
 		{
 			name:            "arm64 architecture",
 			mockOutput:      "aarch64\n",
-			expectSupported: false,
+			expectSupported: true,
+		},
+		{
+			name:            "arm64 without newline",
+			mockOutput:      "arm64",
+			expectSupported: true,
 		},
 		{
 			name:            "i686 architecture",
@@ -505,7 +510,7 @@ func TestGetArchitectureOutput(t *testing.T) {
 			arch := strings.TrimSpace(tt.mockOutput)
 
 			// Test the regex logic
-			isSupported := arch == "x86_64"
+			isSupported := arch == "x86_64" || arch == "amd64" || arch == "aarch64" || arch == "arm64"
 
 			if isSupported != tt.expectSupported {
 				t.Errorf("Expected supported=%v, got %v for arch %q", tt.expectSupported, isSupported, arch)

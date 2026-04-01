@@ -10,11 +10,11 @@ set -euo pipefail
 readonly GITHUB_REPO="KakatkarAkshay/sb-go"
 readonly BINARY_NAME="sb"
 readonly INSTALL_PATH="/usr/local/bin/${BINARY_NAME}"
-readonly DOWNLOAD_BINARY_NAME="sb_linux_amd64"
 readonly TEMP_DIR=$(mktemp -d)
 readonly MIN_BINARY_SIZE=1000000  # 1MB minimum size for sanity check
 DOWNLOAD_TOOL=""  # Will be set by check_dependencies
 FORCE_DOWNLOAD_TOOL=""  # Can be set by command-line argument
+DOWNLOAD_BINARY_NAME=""  # Set after architecture detection
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -67,7 +67,7 @@ check_saltbox_exists() {
 
 # Detect OS and architecture
 detect_platform() {
-    local os arch
+    local os arch normalized_arch
 
     os=$(uname -s | tr '[:upper:]' '[:lower:]')
     arch=$(uname -m)
@@ -78,13 +78,23 @@ detect_platform() {
         exit 1
     fi
 
-    if [[ "${arch}" != "x86_64" && "${arch}" != "amd64" ]]; then
-        log_error "Unsupported architecture: ${arch}"
-        log_error "This installer only supports x86_64/amd64"
-        exit 1
-    fi
+    case "${arch}" in
+        x86_64|amd64)
+            normalized_arch="amd64"
+            ;;
+        aarch64|arm64)
+            normalized_arch="arm64"
+            ;;
+        *)
+            log_error "Unsupported architecture: ${arch}"
+            log_error "This installer only supports x86_64/amd64 and aarch64/arm64"
+            exit 1
+            ;;
+    esac
 
-    log_info "Detected platform: ${os}/${arch}"
+    DOWNLOAD_BINARY_NAME="${BINARY_NAME}_${os}_${normalized_arch}"
+
+    log_info "Detected platform: ${os}/${arch} (normalized as ${normalized_arch})"
 }
 
 # Check for required dependencies
