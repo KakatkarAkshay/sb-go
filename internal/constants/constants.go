@@ -12,7 +12,7 @@ const (
 	AnsiblePlaybookBinaryPath         = "/usr/local/bin/ansible-playbook"
 	SaltboxGitPath                    = "/srv/git"
 	SaltboxRepoPath                   = "/srv/git/saltbox"
-	SaltboxRepoURL                    = "https://github.com/saltyorg/saltbox.git"
+	SaltboxRepoURL                    = "https://github.com/KakatkarAkshay/Saltbox.git"
 	SaltboxAccountsConfigPath         = "/srv/git/saltbox/accounts.yml"
 	SaltboxAdvancedSettingsConfigPath = "/srv/git/saltbox/adv_settings.yml"
 	SaltboxBackupConfigPath           = "/srv/git/saltbox/backup_config.yml"

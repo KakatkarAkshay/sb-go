@@ -20,7 +20,7 @@ jobs:
       - name: Checkout Saltbox repository
         uses: actions/checkout@v6
         with:
-          repository: saltyorg/Saltbox
+          repository: KakatkarAkshay/Saltbox
           path: saltbox
 
       - name: Setup Go

@@ -99,7 +99,7 @@ func doSelfUpdate(autoUpdate bool, verbose bool, optionalMessage string, force b
 		fmt.Println("Debug: Starting self-update process")
 		fmt.Printf("Debug: Current version: %s\n", runtime.Version)
 		fmt.Printf("Debug: Current git commit: %s\n", runtime.GitCommit)
-		fmt.Printf("Debug: Looking for updates in repository: saltyorg/sb-go\n")
+		fmt.Printf("Debug: Looking for updates in repository: KakatkarAkshay/sb-go\n")
 		fmt.Printf("Debug: Auto-update mode: %t\n", autoUpdate)
 		//selfupdate.EnableLog()
 	}
@@ -131,7 +131,7 @@ func doSelfUpdate(autoUpdate bool, verbose bool, optionalMessage string, force b
 		return false, fmt.Errorf("error creating updater: %w", err)
 	}
 
-	latest, found, err := updater.DetectLatest(context.Background(), selfupdate.ParseSlug("saltyorg/sb-go"))
+	latest, found, err := updater.DetectLatest(context.Background(), selfupdate.ParseSlug("KakatkarAkshay/sb-go"))
 	if err != nil {
 		if verbose {
 			fmt.Printf("Debug: Error checking for updates: %v\n", err)
