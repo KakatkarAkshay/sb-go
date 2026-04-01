@@ -1,0 +1,42 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync from saltyorg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          git remote add upstream "https://github.com/saltyorg/${REPO_NAME}.git" 2>/dev/null || \
+            git remote set-url upstream "https://github.com/saltyorg/${REPO_NAME}.git"
+          git fetch upstream --prune --tags
+          git checkout "${DEFAULT_BRANCH}"
+          git merge --no-edit "upstream/${DEFAULT_BRANCH}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${DEFAULT_BRANCH}"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "refs/tags/*:refs/tags/*"
