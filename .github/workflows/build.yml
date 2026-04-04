@@ -77,6 +77,33 @@ jobs:
           name: ${{ env.APP_NAME }}-linux-${{ matrix.goarch }}
           path: ${{ steps.build_binary.outputs.output_name }}
 
+  create-tag:
+    name: Create Release Tag
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create and push tag for this commit
+        run: |
+          short_sha="$(git rev-parse --short "${GITHUB_SHA}")"
+          tag_name="main-${short_sha}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag_name}" > /dev/null 2>&1; then
+            echo "Tag ${tag_name} already exists"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag "${tag_name}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${tag_name}"
+
   release:
     name: Release
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
