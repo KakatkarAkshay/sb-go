@@ -7,6 +7,58 @@ import (
 	"time"
 )
 
+func TestUbuntuMirrorURIsForArch(t *testing.T) {
+	tests := []struct {
+		name            string
+		arch            string
+		wantArchiveURI  string
+		wantSecurityURI string
+	}{
+		{
+			name:            "amd64 uses primary archive",
+			arch:            "amd64",
+			wantArchiveURI:  ubuntuArchiveURI,
+			wantSecurityURI: ubuntuSecurityURI,
+		},
+		{
+			name:            "386 uses primary archive",
+			arch:            "386",
+			wantArchiveURI:  ubuntuArchiveURI,
+			wantSecurityURI: ubuntuSecurityURI,
+		},
+		{
+			name:            "arm64 uses ubuntu ports",
+			arch:            "arm64",
+			wantArchiveURI:  ubuntuPortsURI,
+			wantSecurityURI: ubuntuPortsURI,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotArchiveURI, gotSecurityURI := ubuntuMirrorURIsForArch(tt.arch)
+			if gotArchiveURI != tt.wantArchiveURI {
+				t.Fatalf("archive URI mismatch: got %q, want %q", gotArchiveURI, tt.wantArchiveURI)
+			}
+			if gotSecurityURI != tt.wantSecurityURI {
+				t.Fatalf("security URI mismatch: got %q, want %q", gotSecurityURI, tt.wantSecurityURI)
+			}
+		})
+	}
+}
+
+func TestBuildNobleSourcesContentUsesProvidedURIs(t *testing.T) {
+	content := buildNobleSourcesContent("noble", ubuntuPortsURI, ubuntuPortsURI)
+
+	if !strings.Contains(content, "URIs: "+ubuntuPortsURI) {
+		t.Fatalf("expected generated content to use ubuntu ports URI, got:\n%s", content)
+	}
+
+	if strings.Contains(content, ubuntuArchiveURI) || strings.Contains(content, ubuntuSecurityURI) {
+		t.Fatalf("expected generated content not to contain archive/security URIs, got:\n%s", content)
+	}
+}
+
 // TestInstallPackage_NonExistentPackage tests that we get proper error information
 // when trying to install a package that doesn't exist
 func TestInstallPackage_NonExistentPackage(t *testing.T) {

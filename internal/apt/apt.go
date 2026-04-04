@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +19,12 @@ import (
 
 // aptLockFile is the primary lock file used by dpkg/apt operations.
 const aptLockFile = "/var/lib/dpkg/lock-frontend"
+
+const (
+	ubuntuArchiveURI = "http://archive.ubuntu.com/ubuntu/"
+	ubuntuSecurityURI = "http://security.ubuntu.com/ubuntu/"
+	ubuntuPortsURI = "http://ports.ubuntu.com/ubuntu-ports/"
+)
 
 // isAptLocked checks if the apt/dpkg lock file is currently held by another process.
 // It attempts to acquire a non-blocking exclusive lock on the lock file.
@@ -254,6 +261,7 @@ func AddAptRepositories(ctx context.Context, verbose bool) error {
 	}
 
 	sourcesFile := "/etc/apt/sources.list"
+	archiveURI, securityURI := ubuntuMirrorURIs()
 
 	// Define regex patterns to identify specific Ubuntu releases.
 	jammyRegex := regexp.MustCompile(`(jammy)$`)
@@ -297,10 +305,10 @@ func AddAptRepositories(ctx context.Context, verbose bool) error {
 			fmt.Printf("Configuring repositories for Ubuntu %s\n", release)
 		}
 		repos := []string{
-			"deb http://archive.ubuntu.com/ubuntu/ " + release + " main",
-			"deb http://archive.ubuntu.com/ubuntu/ " + release + " universe",
-			"deb http://archive.ubuntu.com/ubuntu/ " + release + " restricted",
-			"deb http://archive.ubuntu.com/ubuntu/ " + release + " multiverse",
+			"deb " + archiveURI + " " + release + " main",
+			"deb " + archiveURI + " " + release + " universe",
+			"deb " + archiveURI + " " + release + " restricted",
+			"deb " + archiveURI + " " + release + " multiverse",
 		}
 		for _, repo := range repos {
 			if verbose {
@@ -351,7 +359,7 @@ func AddAptRepositories(ctx context.Context, verbose bool) error {
 			archiveSourcesFile := filepath.Join(sourcesDir, "ubuntu-archive.sources")
 
 			// Create DEB822 format content for official Ubuntu archives
-			deb822Content := buildNobleSourcesContent(release)
+			deb822Content := buildNobleSourcesContent(release, archiveURI, securityURI)
 
 			if verbose {
 				fmt.Println("\nWriting ubuntu-archive.sources with content:")
@@ -382,20 +390,20 @@ func AddAptRepositories(ctx context.Context, verbose bool) error {
 
 // buildNobleSourcesContent generates DEB822 format content for Noble Ubuntu archives.
 // It returns a properly formatted .sources file content string.
-func buildNobleSourcesContent(release string) string {
+func buildNobleSourcesContent(release, archiveURI, securityURI string) string {
 	return fmt.Sprintf(
 		"Types: deb\n"+
-			"URIs: http://archive.ubuntu.com/ubuntu/\n"+
+			"URIs: %s\n"+
 			"Suites: %s %s-updates %s-backports\n"+
 			"Components: main restricted universe multiverse\n"+
 			"Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"+
 			"\n"+
 			"Types: deb\n"+
-			"URIs: http://security.ubuntu.com/ubuntu/\n"+
+			"URIs: %s\n"+
 			"Suites: %s-security\n"+
 			"Components: main restricted universe multiverse\n"+
 			"Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n",
-		release, release, release, release)
+		archiveURI, release, release, release, securityURI, release)
 }
 
 // parseUbuntuSources parses a DEB822 format .sources file and extracts all URIs.
@@ -448,12 +456,27 @@ func isUsingArchiveMirror(sourcesFile string) (bool, error) {
 
 	// Check if any URI uses the official archive endpoints
 	for _, uri := range uris {
-		if strings.Contains(uri, "archive.ubuntu.com") || strings.Contains(uri, "security.ubuntu.com") {
+		if strings.Contains(uri, "archive.ubuntu.com") ||
+			strings.Contains(uri, "security.ubuntu.com") ||
+			strings.Contains(uri, "ports.ubuntu.com/ubuntu-ports") {
 			return true, nil
 		}
 	}
 
 	return false, nil
+}
+
+func ubuntuMirrorURIs() (string, string) {
+	return ubuntuMirrorURIsForArch(goruntime.GOARCH)
+}
+
+func ubuntuMirrorURIsForArch(arch string) (string, string) {
+	switch arch {
+	case "amd64", "386":
+		return ubuntuArchiveURI, ubuntuSecurityURI
+	default:
+		return ubuntuPortsURI, ubuntuPortsURI
+	}
 }
 
 // writeDeb822Sources writes repository configuration in DEB822 format to a .sources file.
