@@ -21,7 +21,15 @@ import (
 // InitialSetup performs the initial setup tasks.
 // The context parameter allows for cancellation of long-running operations.
 func InitialSetup(ctx context.Context, verbose bool) error {
-	// Update apt cache
+	// Normalize apt repositories before any package operations so reruns can recover
+	// from broken or x86-only mirror configuration.
+	if err := spinners.RunTaskWithSpinnerContext(ctx, "Adding apt repositories", func() error {
+		return apt.AddAptRepositories(ctx, verbose)
+	}); err != nil {
+		return fmt.Errorf("error adding apt repositories: %w", err)
+	}
+
+	// Update apt cache after repository normalization.
 	if err := spinners.RunTaskWithSpinnerContext(ctx, "Updating apt package cache", func() error {
 		updateCache := apt.UpdatePackageLists(ctx, verbose)
 		return updateCache()
@@ -59,21 +67,6 @@ func InitialSetup(ctx context.Context, verbose bool) error {
 		return installPropsTransport()
 	}); err != nil {
 		return fmt.Errorf("error installing software-properties-common and apt-transport-https: %w", err)
-	}
-
-	// Add apt repos
-	if err := spinners.RunTaskWithSpinnerContext(ctx, "Adding apt repositories", func() error {
-		return apt.AddAptRepositories(ctx, verbose)
-	}); err != nil {
-		return fmt.Errorf("error adding apt repositories: %w", err)
-	}
-
-	// Update apt cache again after adding repositories
-	if err := spinners.RunTaskWithSpinnerContext(ctx, "Updating apt package cache again", func() error {
-		updateCacheAgain := apt.UpdatePackageLists(ctx, verbose)
-		return updateCacheAgain()
-	}); err != nil {
-		return fmt.Errorf("error updating apt cache: %w", err)
 	}
 
 	// Install additional required packages.
