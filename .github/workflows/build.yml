@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - '*'
 
 permissions:
   contents: write
@@ -43,12 +41,7 @@ jobs:
 
       - name: Determine Version
         id: determine_version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "version=main-${{ steps.get_git_commit.outputs.short_sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Build
         env:
@@ -59,14 +52,9 @@ jobs:
           CGO_ENABLED: 0
         run: |
           ldflags="-w -s -X '${MODULE_REPO}/internal/runtime.Version=${VERSION}' -X '${MODULE_REPO}/internal/runtime.GitCommit=${GIT_COMMIT}' -X '${MODULE_REPO}/internal/runtime.DisableSelfUpdate=false'"
-          
-          # For GitHub releases, use the selfupdate naming convention
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            OUTPUT_NAME="${APP_NAME}_${GOOS}_${GOARCH}"
-          else
-            OUTPUT_NAME="${APP_NAME}-${GOARCH}"
-          fi
-          
+
+          OUTPUT_NAME="${APP_NAME}_${GOOS}_${GOARCH}"
+
           go build -trimpath -ldflags="${ldflags}" -o "${OUTPUT_NAME}" .
           echo "output_name=${OUTPUT_NAME}" >> "$GITHUB_OUTPUT"
         id: build_binary
@@ -77,36 +65,8 @@ jobs:
           name: ${{ env.APP_NAME }}-linux-${{ matrix.goarch }}
           path: ${{ steps.build_binary.outputs.output_name }}
 
-  create-tag:
-    name: Create Release Tag
-    if: ${{ github.ref == 'refs/heads/main' }}
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Create and push tag for this commit
-        run: |
-          short_sha="$(git rev-parse --short "${GITHUB_SHA}")"
-          tag_name="main-${short_sha}"
-
-          if git ls-remote --exit-code --tags origin "refs/tags/${tag_name}" > /dev/null 2>&1; then
-            echo "Tag ${tag_name} already exists"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git tag "${tag_name}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${tag_name}"
-
   release:
     name: Release
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -121,10 +81,6 @@ jobs:
           pattern: ${{ env.APP_NAME }}-linux-*
           merge-multiple: true
           path: dist
-
-      - name: Determine Version
-        id: determine_version
-        run: echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate Release Notes
         id: release_notes
@@ -146,18 +102,20 @@ jobs:
 
           echo "" >> release_notes.md
           echo "" >> release_notes.md
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ steps.determine_version.outputs.version }}" >> release_notes.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...${{ needs.build.outputs.version }}" >> release_notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.determine_version.outputs.version }}
-          name: Release ${{ steps.determine_version.outputs.version }}
+          tag_name: ${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Release ${{ needs.build.outputs.version }}
           draft: false
           body_path: release_notes.md
           prerelease: false
+          overwrite_files: true
           files: |
             dist/${{ env.APP_NAME }}_linux_amd64
             dist/${{ env.APP_NAME }}_linux_arm64
@@ -182,10 +140,10 @@ jobs:
             "avatar_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
             "embeds": [
               {
-                "title": "🚀 New Release: ${{ steps.determine_version.outputs.version }}",
+                "title": "🚀 New Release: ${{ needs.build.outputs.version }}",
                 "description": "$(echo "$RELEASE_NOTES" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')",
                 "color": 5814783,
-                "url": "https://github.com/${{ github.repository }}/releases/tag/${{ steps.determine_version.outputs.version }}",
+                "url": "https://github.com/${{ github.repository }}/releases/tag/${{ needs.build.outputs.version }}",
                 "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
                 "footer": {
                   "text": "sb-go",
@@ -194,12 +152,12 @@ jobs:
                 "fields": [
                   {
                     "name": "📥 Download",
-                    "value": "[amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.determine_version.outputs.version }}/sb_linux_amd64) | [arm64](https://github.com/${{ github.repository }}/releases/download/${{ steps.determine_version.outputs.version }}/sb_linux_arm64)",
+                    "value": "[amd64](https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.version }}/sb_linux_amd64) | [arm64](https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.version }}/sb_linux_arm64)",
                     "inline": true
                   },
                   {
                     "name": "📝 Full Changelog",
-                    "value": "[View Changes](https://github.com/${{ github.repository }}/releases/tag/${{ steps.determine_version.outputs.version }})",
+                    "value": "[View Changes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.build.outputs.version }})",
                     "inline": true
                   }
                 ]
